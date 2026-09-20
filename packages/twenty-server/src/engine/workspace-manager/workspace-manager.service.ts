@@ -1,3 +1,4 @@
+import { AgentHistoryLifecycleService } from 'src/engine/metadata-modules/ai/ai-history/services/agent-history-lifecycle.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 
@@ -33,6 +34,7 @@ export class WorkspaceManagerService {
     @InjectWorkspaceScopedRepository(RoleEntity)
     private readonly roleRepository: WorkspaceScopedRepository<RoleEntity>,
     private readonly applicationService: ApplicationService,
+    private readonly agentHistoryLifecycleService: AgentHistoryLifecycleService,
   ) {}
 
   public async init({
@@ -68,6 +70,9 @@ export class WorkspaceManagerService {
         workspaceId,
       },
     );
+
+    // History tables must exist before their core references and route are initialized.
+    await this.agentHistoryLifecycleService.initializeWorkspace(workspaceId);
 
     const dataSourceMetadataCreationEnd = performance.now();
 
