@@ -1,3 +1,5 @@
+import { InjectAgentHistoryRepository } from 'src/engine/metadata-modules/ai/ai-history/repositories/inject-agent-history-repository.decorator';
+import { AgentHistoryRepository } from 'src/engine/metadata-modules/ai/ai-history/repositories/agent-history-repository';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 
@@ -10,21 +12,16 @@ import { UserInputError } from 'src/engine/core-modules/graphql/utils/graphql-er
 import { WorkspaceEntity } from 'src/engine/core-modules/workspace/workspace.entity';
 import { AgentMessageEntity } from 'src/engine/metadata-modules/ai/ai-agent-execution/entities/agent-message.entity';
 import { AgentChatThreadEntity } from 'src/engine/metadata-modules/ai/ai-chat/entities/agent-chat-thread.entity';
-import { InjectWorkspaceScopedRepository } from 'src/engine/twenty-orm/workspace-scoped-repository/inject-workspace-scoped-repository.decorator';
-import { WorkspaceScopedRepository } from 'src/engine/twenty-orm/workspace-scoped-repository/workspace-scoped-repository';
 
 @Injectable()
 export class AdminPanelChatService {
   constructor(
     @InjectRepository(WorkspaceEntity)
     private readonly workspaceRepository: Repository<WorkspaceEntity>,
-    // Thread lookup is by id alone; the admin does not know the workspaceId
-    // upfront. assertWorkspaceAllowsImpersonation gates every other read.
-    // eslint-disable-next-line twenty/prefer-workspace-scoped-repository
-    @InjectRepository(AgentChatThreadEntity)
-    private readonly agentChatThreadRepository: Repository<AgentChatThreadEntity>,
-    @InjectWorkspaceScopedRepository(AgentMessageEntity)
-    private readonly agentMessageRepository: WorkspaceScopedRepository<AgentMessageEntity>,
+    @InjectAgentHistoryRepository('agentChatThread')
+    private readonly agentChatThreadRepository: AgentHistoryRepository<AgentChatThreadEntity>,
+    @InjectAgentHistoryRepository('agentMessage')
+    private readonly agentMessageRepository: AgentHistoryRepository<AgentMessageEntity>,
   ) {}
 
   private async assertWorkspaceAllowsImpersonation(
@@ -49,8 +46,7 @@ export class AdminPanelChatService {
   ): Promise<AdminWorkspaceChatThreadDTO[]> {
     await this.assertWorkspaceAllowsImpersonation(workspaceId);
 
-    const threads = await this.agentChatThreadRepository.find({
-      where: { workspaceId },
+    const threads = await this.agentChatThreadRepository.find(workspaceId, {
       order: { updatedAt: 'DESC' },
       take: 100,
     });
@@ -83,16 +79,16 @@ export class AdminPanelChatService {
       return new Map();
     }
 
-    const rows = await this.agentMessageRepository
-      .createQueryBuilder('message')
-      .select('"message"."threadId"', 'threadId')
-      .addSelect('COUNT(*)::int', 'messageCount')
-      .where(
-        '"message"."workspaceId" = :workspaceId AND "message"."threadId" IN (:...threadIds) AND "message"."isHidden" = false',
-        { workspaceId, threadIds },
-      )
-      .groupBy('"message"."threadId"')
-      .getRawMany<{ threadId: string; messageCount: number }>();
+    const rows = await this.agentMessageRepository.query(
+      workspaceId,
+      ({ manager, table, storage }) =>
+        manager.query<{ threadId: string; messageCount: number }[]>(
+          `SELECT "threadId", COUNT(*)::int AS "messageCount" FROM ${table('agentMessage')}
+       WHERE "threadId" = ANY($1::uuid[]) AND "isHidden" = false ${storage === 'core' ? 'AND "workspaceId" = $2' : ''}
+       GROUP BY "threadId"`,
+          storage === 'core' ? [threadIds, workspaceId] : [threadIds],
+        ),
+    );
 
     return new Map(rows.map((row) => [row.threadId, row.messageCount]));
   }
@@ -101,9 +97,17 @@ export class AdminPanelChatService {
     thread: AdminWorkspaceChatThreadDTO;
     messages: AdminChatMessageDTO[];
   }> {
-    const thread = await this.agentChatThreadRepository.findOne({
-      where: { id: threadId },
+    const workspaces = await this.workspaceRepository.find({
+      where: { allowImpersonation: true },
+      select: { id: true },
     });
+    let thread: AgentChatThreadEntity | null = null;
+    for (const workspace of workspaces) {
+      thread = await this.agentChatThreadRepository.findOne(workspace.id, {
+        where: { id: threadId },
+      });
+      if (isDefined(thread)) break;
+    }
 
     if (!isDefined(thread)) {
       throw new UserInputError('Thread not found');
