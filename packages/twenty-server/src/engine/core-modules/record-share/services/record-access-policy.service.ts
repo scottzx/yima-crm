@@ -98,13 +98,10 @@ export class RecordAccessPolicyService {
           return new Set();
         }
 
-        if (!(await fetchIsRecordSharingEnabled())) {
-          return new Set(snapshots.map((snapshot) => snapshot.id));
-        }
-
         return this.resolveSnapshotIdsAdmittedByRecordShareGate(
           { workspaceId, objectMetadata, snapshots, subject, depth: 0 },
           fetchRecordShares,
+          await fetchIsRecordSharingEnabled(),
         );
       },
     };
@@ -164,10 +161,16 @@ export class RecordAccessPolicyService {
   private async resolveSnapshotIdsAdmittedByRecordShareGate(
     evaluation: SnapshotEvaluation,
     fetchRecordShares: FetchRecordShares,
+    isRecordSharingEnabled?: boolean,
   ): Promise<Set<string>> {
     const { objectMetadata, snapshots, subject } = evaluation;
     const gateKind = resolveRecordShareGateKind({
       readability: objectMetadata.readability,
+      isRecordSharingEnabled:
+        isRecordSharingEnabled ??
+        (await this.recordSharingFeatureService.isRecordSharingEnabled(
+          evaluation.workspaceId,
+        )),
       isOwningApplication: subject.isOwningApplication(objectMetadata),
     });
 
