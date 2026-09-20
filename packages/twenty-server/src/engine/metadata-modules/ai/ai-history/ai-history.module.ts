@@ -1,3 +1,4 @@
+import { AgentHistoryLifecycleService } from 'src/engine/metadata-modules/ai/ai-history/services/agent-history-lifecycle.service';
 import { Module } from '@nestjs/common';
 import { AgentHistoryStorageService } from 'src/engine/metadata-modules/ai/ai-history/services/agent-history-storage.service';
 import { AgentHistoryRepository } from 'src/engine/metadata-modules/ai/ai-history/repositories/agent-history-repository';
@@ -79,12 +80,12 @@ const providers = [
 @Module({
   providers: [
     AgentHistoryStorageService,
-
+    AgentHistoryLifecycleService,
     ...providers,
   ],
   exports: [
     AgentHistoryStorageService,
-
+    AgentHistoryLifecycleService,
     ...providers,
   ],
 })
